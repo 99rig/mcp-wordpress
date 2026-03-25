@@ -1,12 +1,13 @@
 <?php
 /**
  * Plugin Name: MCP Discovery
- * Plugin URI:  https://mcpstandard.dev
+ * Plugin URI:  https://github.com/99rig/mcp-wordpress
  * Description: Exposes /.well-known/mcp-server so AI agents can discover your site via mcp://. Implements draft-serra-mcp-discovery-uri. WooCommerce-aware.
  * Version:     0.2.0
  * Author:      Marco Serra
  * Author URI:  https://mcpstandard.dev
- * License:     MIT
+ * License:     GPL-2.0-or-later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Requires at least: 5.0
  * Requires PHP: 7.4
  * Text Domain: mcp-discovery

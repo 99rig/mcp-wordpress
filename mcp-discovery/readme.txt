@@ -5,8 +5,8 @@ Requires at least: 5.0
 Tested up to: 6.7
 Requires PHP: 7.4
 Stable tag: 0.2.0
-License: MIT
-License URI: https://opensource.org/licenses/MIT
+License: GPL-2.0-or-later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
 Exposes /.well-known/mcp-server so AI agents can discover your site via mcp://. Implements draft-serra-mcp-discovery-uri. WooCommerce-aware.
 
