@@ -1,8 +1,8 @@
 === MCP Discovery ===
 Contributors: 99rig
-Tags: mcp, ai, discovery, rest-api, well-known, woocommerce
+Tags: mcp, ai, discovery, rest-api, woocommerce
 Requires at least: 5.0
-Tested up to: 6.7
+Tested up to: 6.9
 Requires PHP: 7.4
 Stable tag: 0.2.0
 License: GPL-2.0-or-later

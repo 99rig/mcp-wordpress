@@ -33,7 +33,7 @@ class MCP_Endpoint {
     }
 
     public function handle_request() {
-        $uri = isset( $_SERVER['REQUEST_URI'] ) ? $_SERVER['REQUEST_URI'] : '';
+        $uri = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
 
         // Normalize: strip query string and trailing slash
         $path = strtok( $uri, '?' );

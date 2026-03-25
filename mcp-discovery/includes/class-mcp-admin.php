@@ -60,10 +60,16 @@ class MCP_Admin {
         ?>
         <div class="wrap">
             <h1><?php esc_html_e( 'MCP Discovery', 'mcp-discovery' ); ?></h1>
-            <p><?php printf(
-                __( 'This plugin exposes <code>/.well-known/mcp-server</code> so AI agents can discover your MCP server. Implements <a href="%s" target="_blank">draft-serra-mcp-discovery-uri</a>.', 'mcp-discovery' ),
-                'https://datatracker.ietf.org/doc/draft-serra-mcp-discovery-uri/'
-            ); ?></p>
+            <p><?php
+                // translators: %s is the URL to the IETF draft specification.
+                printf(
+                    wp_kses(
+                        __( 'This plugin exposes <code>/.well-known/mcp-server</code> so AI agents can discover your MCP server. Implements <a href="%s" target="_blank">draft-serra-mcp-discovery-uri</a>.', 'mcp-discovery' ),
+                        array( 'code' => array(), 'a' => array( 'href' => array(), 'target' => array() ) )
+                    ),
+                    esc_url( 'https://datatracker.ietf.org/doc/draft-serra-mcp-discovery-uri/' )
+                );
+            ?></p>
 
             <div class="notice notice-info">
                 <p>
