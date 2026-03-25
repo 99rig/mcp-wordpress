@@ -2,6 +2,8 @@
 /**
  * Builds the MCP manifest JSON from WordPress/WooCommerce settings.
  *
+ * Compatible with WordPress 5.0+ and PHP 7.4+.
+ *
  * @package MCPDiscovery
  */
 
@@ -11,10 +13,13 @@ class MCP_Manifest {
 
     /**
      * Build and return the manifest array.
+     *
+     * @return array
      */
     public static function build() {
         $options = get_option( 'mcp_discovery_options', array() );
 
+        // Required fields (MUST per draft-serra-mcp-discovery-uri)
         $manifest = array(
             'mcp_version' => '2025-06-18',
             'name'        => self::get_name( $options ),
@@ -22,16 +27,15 @@ class MCP_Manifest {
             'transport'   => 'http',
         );
 
-        // SHOULD fields
+        // Recommended fields (SHOULD)
         $description = self::get_description( $options );
         if ( $description ) {
             $manifest['description'] = $description;
         }
-
         $manifest['auth']         = self::get_auth( $options );
-        $manifest['capabilities'] = self::get_capabilities();
+        $manifest['capabilities'] = array( 'tools', 'resources' );
 
-        // MAY fields
+        // Optional fields (MAY)
         $categories = self::get_categories( $options );
         if ( ! empty( $categories ) ) {
             $manifest['categories'] = $categories;
@@ -42,23 +46,28 @@ class MCP_Manifest {
             $manifest['languages'] = $languages;
         }
 
-        $contact = isset( $options['contact'] ) ? sanitize_email( $options['contact'] ) : get_option( 'admin_email' );
+        $contact = self::get_contact( $options );
         if ( $contact ) {
             $manifest['contact'] = $contact;
         }
 
-        $manifest['docs']         = isset( $options['docs'] ) ? esc_url( $options['docs'] ) : '';
-        $manifest['last_updated'] = gmdate( 'c' );
-        $manifest['crawl']        = isset( $options['crawl'] ) ? (bool) $options['crawl'] : true;
+        $docs = ! empty( $options['docs'] ) ? esc_url_raw( $options['docs'] ) : '';
+        if ( $docs ) {
+            $manifest['docs'] = $docs;
+        }
 
-        // Remove empty values
-        $manifest = array_filter( $manifest, function( $v ) {
-            return $v !== '' && $v !== null;
-        });
+        $manifest['last_updated'] = gmdate( 'c' );
+
+        // crawl defaults to true — opt-out is explicit
+        $manifest['crawl'] = isset( $options['crawl'] ) ? (bool) $options['crawl'] : true;
 
         return $manifest;
     }
 
+    /**
+     * @param array $options
+     * @return string
+     */
     private static function get_name( $options ) {
         if ( ! empty( $options['name'] ) ) {
             return sanitize_text_field( $options['name'] );
@@ -66,34 +75,51 @@ class MCP_Manifest {
         return get_bloginfo( 'name' ) . ' MCP Server';
     }
 
+    /**
+     * @param array $options
+     * @return string
+     */
     private static function get_endpoint( $options ) {
         if ( ! empty( $options['endpoint'] ) ) {
-            return esc_url( $options['endpoint'] );
+            return esc_url_raw( $options['endpoint'] );
         }
-        return rest_url( 'mcp/v1' );
+        // Use REST API base if available (WP 4.4+), otherwise home URL
+        if ( function_exists( 'rest_url' ) ) {
+            return rest_url( 'mcp/v1' );
+        }
+        return home_url( '/mcp' );
     }
 
+    /**
+     * @param array $options
+     * @return string
+     */
     private static function get_description( $options ) {
         if ( ! empty( $options['description'] ) ) {
             return sanitize_textarea_field( $options['description'] );
         }
-        $tagline = get_bloginfo( 'description' );
-        return $tagline ?: '';
+        return get_bloginfo( 'description' );
     }
 
+    /**
+     * @param array $options
+     * @return array
+     */
     private static function get_auth( $options ) {
         $type = isset( $options['auth_type'] ) ? $options['auth_type'] : 'none';
-        if ( $type === 'none' ) {
-            return array( 'type' => 'none' );
+        $allowed = array( 'none', 'apikey', 'oauth2' );
+        if ( ! in_array( $type, $allowed, true ) ) {
+            $type = 'none';
         }
-        return array( 'type' => sanitize_text_field( $type ) );
+        return array( 'type' => $type );
     }
 
-    private static function get_capabilities() {
-        $caps = array( 'tools', 'resources' );
-        return $caps;
-    }
-
+    /**
+     * Auto-detects WooCommerce and merges with user-defined categories.
+     *
+     * @param array $options
+     * @return array
+     */
     private static function get_categories( $options ) {
         $cats = array();
 
@@ -102,19 +128,36 @@ class MCP_Manifest {
             $cats[] = 'e-commerce';
         }
 
-        // User-defined categories
+        // User-defined categories (comma-separated)
         if ( ! empty( $options['categories'] ) ) {
-            $user_cats = array_map( 'sanitize_text_field', explode( ',', $options['categories'] ) );
+            $user_cats = array_map( 'trim', explode( ',', $options['categories'] ) );
+            $user_cats = array_map( 'sanitize_text_field', $user_cats );
             $cats      = array_unique( array_merge( $cats, $user_cats ) );
         }
 
         return array_values( array_filter( $cats ) );
     }
 
+    /**
+     * Returns ISO 639-1 language code from WordPress locale.
+     *
+     * @return array
+     */
     private static function get_languages() {
         $locale = get_locale();
-        // Convert WordPress locale (e.g. it_IT) to ISO 639-1 (e.g. it)
+        // e.g. it_IT → it, en_US → en
         $lang = strtolower( substr( $locale, 0, 2 ) );
         return array( $lang );
+    }
+
+    /**
+     * @param array $options
+     * @return string
+     */
+    private static function get_contact( $options ) {
+        if ( ! empty( $options['contact'] ) ) {
+            return sanitize_email( $options['contact'] );
+        }
+        return sanitize_email( get_option( 'admin_email', '' ) );
     }
 }
