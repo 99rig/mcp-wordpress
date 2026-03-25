@@ -151,6 +151,14 @@ class MCP_Admin {
                         </td>
                     </tr>
                     <tr>
+                        <th><?php esc_html_e( 'Manifest Expiry (days)', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="number" name="mcp_discovery_options[expires_days]" min="1" max="365"
+                                value="<?php echo esc_attr( $options['expires_days'] ?? 90 ); ?>" style="width:80px" />
+                            <p class="description"><?php esc_html_e( 'How many days before the manifest expires and must be re-fetched (1-365). Default: 90.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
                         <th><?php esc_html_e( 'Allow Crawling', 'mcp-discovery' ); ?></th>
                         <td>
                             <input type="checkbox" name="mcp_discovery_options[crawl]" value="1"
