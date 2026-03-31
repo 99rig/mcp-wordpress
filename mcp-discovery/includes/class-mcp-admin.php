@@ -30,7 +30,9 @@ class MCP_Admin {
         if ( 'settings_page_mcp-discovery' !== $hook ) {
             return;
         }
-        wp_add_inline_script( 'jquery', $this->get_inline_js() );
+        wp_register_script( 'mcp-discovery-admin', '', array( 'jquery' ), MCP_DISCOVERY_VERSION, true );
+        wp_enqueue_script( 'mcp-discovery-admin' );
+        wp_add_inline_script( 'mcp-discovery-admin', $this->get_inline_js() );
     }
 
     private function get_inline_js() {
