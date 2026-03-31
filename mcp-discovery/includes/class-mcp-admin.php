@@ -1,6 +1,7 @@
 <?php
 /**
  * Admin settings page for MCP Discovery.
+ * Implements draft-serra-mcp-discovery-uri-04.
  *
  * @package MCPDiscovery
  */
@@ -41,15 +42,45 @@ class MCP_Admin {
 
     public function sanitize_options( $input ) {
         $output = array();
+
+        // Base
         $output['enabled']     = ! empty( $input['enabled'] );
         $output['name']        = sanitize_text_field( $input['name'] ?? '' );
         $output['description'] = sanitize_textarea_field( $input['description'] ?? '' );
         $output['endpoint']    = esc_url_raw( $input['endpoint'] ?? '' );
-        $output['auth_type']   = in_array( $input['auth_type'] ?? 'none', array( 'none', 'apikey', 'oauth2' ) ) ? $input['auth_type'] : 'none';
         $output['categories']  = sanitize_text_field( $input['categories'] ?? '' );
         $output['contact']     = sanitize_email( $input['contact'] ?? '' );
         $output['docs']        = esc_url_raw( $input['docs'] ?? '' );
         $output['crawl']       = ! empty( $input['crawl'] );
+
+        // Auth — draft-04 core vocabulary + x- extensions
+        $allowed_auth = array( 'none', 'bearer', 'mtls', 'apikey', 'oauth2' );
+        $auth_type = $input['auth_type'] ?? 'none';
+        if ( ! in_array( $auth_type, $allowed_auth, true ) ) {
+            if ( strpos( $auth_type, 'x-' ) !== 0 ) {
+                $auth_type = 'none';
+            }
+        }
+        $output['auth_type']     = $auth_type;
+        $output['auth_endpoint'] = esc_url_raw( $input['auth_endpoint'] ?? '' );
+
+        // trust_class — draft-04 Section 6.10.2
+        $allowed_trust = array( '', 'public', 'sandbox', 'enterprise', 'regulated' );
+        $output['trust_class'] = in_array( $input['trust_class'] ?? '', $allowed_trust, true )
+            ? $input['trust_class']
+            : '';
+
+        // sandbox
+        $output['expires_days'] = min( 365, max( 1, (int) ( $input['expires_days'] ?? 30 ) ) );
+
+        // regulated
+        $output['jurisdiction']      = sanitize_text_field( $input['jurisdiction'] ?? '' );
+        $output['frameworks']        = sanitize_text_field( $input['frameworks'] ?? '' );
+        $output['log_retention_days'] = max( 1, (int) ( $input['log_retention_days'] ?? 90 ) );
+
+        // cache_ttl
+        $output['cache_ttl'] = max( 60, (int) ( $input['cache_ttl'] ?? 3600 ) );
+
         return $output;
     }
 
@@ -57,14 +88,14 @@ class MCP_Admin {
         $options      = get_option( 'mcp_discovery_options', array() );
         $manifest_url = home_url( '/.well-known/mcp-server' );
         $mcp_uri      = 'mcp://' . wp_parse_url( home_url(), PHP_URL_HOST );
+        $trust_class  = $options['trust_class'] ?? '';
         ?>
         <div class="wrap">
             <h1><?php esc_html_e( 'MCP Discovery', 'mcp-discovery' ); ?></h1>
             <p><?php
-                // translators: %s is the URL to the IETF draft specification.
                 printf(
                     wp_kses(
-                        __( 'This plugin exposes <code>/.well-known/mcp-server</code> so AI agents can discover your MCP server. Implements <a href="%s" target="_blank">draft-serra-mcp-discovery-uri</a>.', 'mcp-discovery' ),
+                        __( 'This plugin exposes <code>/.well-known/mcp-server</code> so AI agents can discover your MCP server. Implements <a href="%s" target="_blank">draft-serra-mcp-discovery-uri-04</a>.', 'mcp-discovery' ),
                         array( 'code' => array(), 'a' => array( 'href' => array(), 'target' => array() ) )
                     ),
                     esc_url( 'https://datatracker.ietf.org/doc/draft-serra-mcp-discovery-uri/' )
@@ -84,6 +115,8 @@ class MCP_Admin {
 
             <form method="post" action="options.php">
                 <?php settings_fields( 'mcp_discovery' ); ?>
+
+                <h2><?php esc_html_e( 'General', 'mcp-discovery' ); ?></h2>
                 <table class="form-table">
                     <tr>
                         <th><?php esc_html_e( 'Enable', 'mcp-discovery' ); ?></th>
@@ -118,16 +151,6 @@ class MCP_Admin {
                         </td>
                     </tr>
                     <tr>
-                        <th><?php esc_html_e( 'Authentication', 'mcp-discovery' ); ?></th>
-                        <td>
-                            <select name="mcp_discovery_options[auth_type]">
-                                <option value="none" <?php selected( $options['auth_type'] ?? 'none', 'none' ); ?>>None</option>
-                                <option value="apikey" <?php selected( $options['auth_type'] ?? 'none', 'apikey' ); ?>>API Key</option>
-                                <option value="oauth2" <?php selected( $options['auth_type'] ?? 'none', 'oauth2' ); ?>>OAuth 2.0</option>
-                            </select>
-                        </td>
-                    </tr>
-                    <tr>
                         <th><?php esc_html_e( 'Categories', 'mcp-discovery' ); ?></th>
                         <td>
                             <input type="text" name="mcp_discovery_options[categories]" class="regular-text"
@@ -151,14 +174,6 @@ class MCP_Admin {
                         </td>
                     </tr>
                     <tr>
-                        <th><?php esc_html_e( 'Manifest Expiry (days)', 'mcp-discovery' ); ?></th>
-                        <td>
-                            <input type="number" name="mcp_discovery_options[expires_days]" min="1" max="365"
-                                value="<?php echo esc_attr( $options['expires_days'] ?? 90 ); ?>" style="width:80px" />
-                            <p class="description"><?php esc_html_e( 'How many days before the manifest expires and must be re-fetched (1-365). Default: 90.', 'mcp-discovery' ); ?></p>
-                        </td>
-                    </tr>
-                    <tr>
                         <th><?php esc_html_e( 'Allow Crawling', 'mcp-discovery' ); ?></th>
                         <td>
                             <input type="checkbox" name="mcp_discovery_options[crawl]" value="1"
@@ -166,7 +181,97 @@ class MCP_Admin {
                             <?php esc_html_e( 'Allow MCP crawlers to index this server.', 'mcp-discovery' ); ?>
                         </td>
                     </tr>
+                    <tr>
+                        <th><?php esc_html_e( 'Cache TTL (seconds)', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="number" name="mcp_discovery_options[cache_ttl]" min="60" max="86400"
+                                value="<?php echo esc_attr( $options['cache_ttl'] ?? 3600 ); ?>" style="width:100px" />
+                            <p class="description"><?php esc_html_e( 'How long clients should cache this manifest. Default: 3600 (1 hour). For regulated servers use 300 or less.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
                 </table>
+
+                <h2><?php esc_html_e( 'Authentication', 'mcp-discovery' ); ?></h2>
+                <table class="form-table">
+                    <tr>
+                        <th><?php esc_html_e( 'Auth Method', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <select name="mcp_discovery_options[auth_type]">
+                                <option value="none"   <?php selected( $options['auth_type'] ?? 'none', 'none' ); ?>><?php esc_html_e( 'None (public)', 'mcp-discovery' ); ?></option>
+                                <option value="bearer" <?php selected( $options['auth_type'] ?? 'none', 'bearer' ); ?>><?php esc_html_e( 'Bearer Token', 'mcp-discovery' ); ?></option>
+                                <option value="apikey" <?php selected( $options['auth_type'] ?? 'none', 'apikey' ); ?>><?php esc_html_e( 'API Key', 'mcp-discovery' ); ?></option>
+                                <option value="oauth2" <?php selected( $options['auth_type'] ?? 'none', 'oauth2' ); ?>><?php esc_html_e( 'OAuth 2.0', 'mcp-discovery' ); ?></option>
+                                <option value="mtls"   <?php selected( $options['auth_type'] ?? 'none', 'mtls' ); ?>><?php esc_html_e( 'Mutual TLS', 'mcp-discovery' ); ?></option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><?php esc_html_e( 'Auth Endpoint URL', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="url" name="mcp_discovery_options[auth_endpoint]" class="regular-text"
+                                value="<?php echo esc_attr( $options['auth_endpoint'] ?? '' ); ?>"
+                                placeholder="https://yoursite.com/.well-known/oauth-authorization-server" />
+                            <p class="description"><?php esc_html_e( 'Required for Bearer and OAuth 2.0 methods.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
+                </table>
+
+                <h2><?php esc_html_e( 'Security Posture', 'mcp-discovery' ); ?></h2>
+                <p class="description"><?php esc_html_e( 'Declares the server trust class per draft-04 Section 6.10. If left empty, clients treat this server as "public".', 'mcp-discovery' ); ?></p>
+                <table class="form-table">
+                    <tr>
+                        <th><?php esc_html_e( 'Trust Class', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <select name="mcp_discovery_options[trust_class]">
+                                <option value=""           <?php selected( $trust_class, '' ); ?>><?php esc_html_e( '— not declared (defaults to public) —', 'mcp-discovery' ); ?></option>
+                                <option value="public"     <?php selected( $trust_class, 'public' ); ?>><?php esc_html_e( 'public — no restrictions', 'mcp-discovery' ); ?></option>
+                                <option value="sandbox"    <?php selected( $trust_class, 'sandbox' ); ?>><?php esc_html_e( 'sandbox — non-production / test', 'mcp-discovery' ); ?></option>
+                                <option value="enterprise" <?php selected( $trust_class, 'enterprise' ); ?>><?php esc_html_e( 'enterprise — controlled access', 'mcp-discovery' ); ?></option>
+                                <option value="regulated"  <?php selected( $trust_class, 'regulated' ); ?>><?php esc_html_e( 'regulated — compliance required', 'mcp-discovery' ); ?></option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><?php esc_html_e( 'Manifest Expiry (days)', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="number" name="mcp_discovery_options[expires_days]" min="1" max="365"
+                                value="<?php echo esc_attr( $options['expires_days'] ?? 30 ); ?>" style="width:80px" />
+                            <p class="description"><?php esc_html_e( 'Required when trust class is "sandbox". Default: 30 days.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
+                </table>
+
+                <h2><?php esc_html_e( 'Compliance (regulated only)', 'mcp-discovery' ); ?></h2>
+                <p class="description"><?php esc_html_e( 'Required when trust class is "regulated".', 'mcp-discovery' ); ?></p>
+                <table class="form-table">
+                    <tr>
+                        <th><?php esc_html_e( 'Jurisdiction', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="text" name="mcp_discovery_options[jurisdiction]" class="regular-text"
+                                value="<?php echo esc_attr( $options['jurisdiction'] ?? '' ); ?>"
+                                placeholder="EU" />
+                            <p class="description"><?php esc_html_e( 'ISO 3166-1 country code or regional code: EU, EEA, UK, IT, DE, US, etc.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><?php esc_html_e( 'Compliance Frameworks', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="text" name="mcp_discovery_options[frameworks]" class="regular-text"
+                                value="<?php echo esc_attr( $options['frameworks'] ?? '' ); ?>"
+                                placeholder="GDPR, ISO27001" />
+                            <p class="description"><?php esc_html_e( 'Comma-separated. Examples: GDPR, HIPAA, ISO27001, PCI-DSS, SOC2.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><?php esc_html_e( 'Log Retention (days)', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="number" name="mcp_discovery_options[log_retention_days]" min="1"
+                                value="<?php echo esc_attr( $options['log_retention_days'] ?? 90 ); ?>" style="width:80px" />
+                            <p class="description"><?php esc_html_e( 'Minimum log retention period declared to clients. Default: 90 days.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
+                </table>
+
                 <?php submit_button(); ?>
             </form>
         </div>
