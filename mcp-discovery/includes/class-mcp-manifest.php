@@ -66,6 +66,11 @@ class MCP_Manifest {
             $manifest['docs'] = $docs;
         }
 
+        $coverage = ! empty( $options['coverage'] ) ? sanitize_text_field( $options['coverage'] ) : '';
+        if ( $coverage ) {
+            $manifest['coverage'] = strtoupper( $coverage );
+        }
+
         $manifest['last_updated'] = gmdate( 'c' );
 
         // crawl defaults to true — opt-out is explicit

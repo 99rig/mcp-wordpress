@@ -52,6 +52,7 @@ class MCP_Admin {
         $output['contact']     = sanitize_email( $input['contact'] ?? '' );
         $output['docs']        = esc_url_raw( $input['docs'] ?? '' );
         $output['crawl']       = ! empty( $input['crawl'] );
+        $output['coverage']    = sanitize_text_field( $input['coverage'] ?? '' );
 
         // Auth — draft-04 core vocabulary + x- extensions
         $allowed_auth = array( 'none', 'bearer', 'mtls', 'apikey', 'oauth2' );
@@ -179,6 +180,15 @@ class MCP_Admin {
                             <input type="checkbox" name="mcp_discovery_options[crawl]" value="1"
                                 <?php checked( $options['crawl'] ?? true ); ?> />
                             <?php esc_html_e( 'Allow MCP crawlers to index this server.', 'mcp-discovery' ); ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><?php esc_html_e( 'Coverage', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="text" name="mcp_discovery_options[coverage]" style="width:80px"
+                                value="<?php echo esc_attr( $options['coverage'] ?? '' ); ?>"
+                                placeholder="IT" />
+                            <p class="description"><?php esc_html_e( 'ISO 3166-1 country code for the geographic coverage of this server. Examples: IT, EU, WW.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
                     <tr>
