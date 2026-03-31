@@ -51,7 +51,7 @@ class MCP_Validator {
             }
 
             // 3. Endpoint availability (HTTP check)
-            if ( $options['server_type'] ?? '' !== 'none' ) {
+            if ( ( $options['server_type'] ?? 'none' ) !== 'none' ) {
                 $response = wp_remote_get( $endpoint, array(
                     'timeout'   => 5,
                     'sslverify' => false,
