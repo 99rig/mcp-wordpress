@@ -3,7 +3,7 @@
  * Plugin Name: MCP Discovery
  * Plugin URI:  https://github.com/99rig/mcp-wordpress
  * Description: Exposes /.well-known/mcp-server so AI agents can discover your site via mcp://. Implements draft-serra-mcp-discovery-uri. WooCommerce-aware.
- * Version:     0.4.1
+ * Version:     0.5.0
  * Author:      Mumble Group
  * Author URI:  https://mumble.group
  * License:     GPL-2.0-or-later
@@ -17,12 +17,13 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'MCP_DISCOVERY_VERSION', '0.4.1' );
+define( 'MCP_DISCOVERY_VERSION', '0.5.0' );
 define( 'MCP_DISCOVERY_PATH', plugin_dir_path( __FILE__ ) );
 define( 'MCP_DISCOVERY_URL', plugin_dir_url( __FILE__ ) );
 
 require_once MCP_DISCOVERY_PATH . 'includes/class-mcp-manifest.php';
 require_once MCP_DISCOVERY_PATH . 'includes/class-mcp-endpoint.php';
+require_once MCP_DISCOVERY_PATH . 'includes/class-mcp-validator.php';
 require_once MCP_DISCOVERY_PATH . 'includes/class-mcp-admin.php';
 
 function mcp_discovery_init() {

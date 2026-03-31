@@ -1,6 +1,6 @@
 <?php
 /**
- * Admin settings page for MCP Discovery.
+ * Admin settings page for MCP Discovery — wizard UI.
  * Implements draft-serra-mcp-discovery-uri-04.
  *
  * @package MCPDiscovery
@@ -20,8 +20,80 @@ class MCP_Admin {
     }
 
     public function init() {
-        add_action( 'admin_menu', array( $this, 'add_menu' ) );
-        add_action( 'admin_init', array( $this, 'register_settings' ) );
+        add_action( 'admin_menu',     array( $this, 'add_menu' ) );
+        add_action( 'admin_init',     array( $this, 'register_settings' ) );
+        add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
+        add_action( 'wp_ajax_mcp_validate', array( $this, 'ajax_validate' ) );
+    }
+
+    public function enqueue_scripts( $hook ) {
+        if ( 'settings_page_mcp-discovery' !== $hook ) {
+            return;
+        }
+        // Inline JS for show/hide logic and AJAX validate
+        wp_add_inline_script( 'jquery', $this->get_inline_js() );
+    }
+
+    private function get_inline_js() {
+        return "
+        jQuery(function($){
+            function toggleSections() {
+                var type = $('input[name=\"mcp_discovery_options[server_type]\"]:checked').val();
+                $('.mcp-section-external').toggle(type === 'external');
+                $('.mcp-section-internal').toggle(type === 'internal');
+                $('.mcp-section-none').toggle(type === 'none');
+                $('.mcp-section-auth').show();
+                $('.mcp-section-security').show();
+            }
+            function toggleComplianceSection() {
+                var tc = $('#mcp_trust_class').val();
+                $('.mcp-compliance-section').toggle(tc === 'regulated');
+                $('#mcp_expires_row').toggle(tc === 'sandbox');
+                $('.mcp-auth-required-note').toggle(tc === 'enterprise' || tc === 'regulated');
+            }
+            function toggleAuthEndpoint() {
+                var method = $('#mcp_auth_type').val();
+                $('#mcp_auth_endpoint_row').toggle(method === 'bearer' || method === 'oauth2');
+            }
+            $('input[name=\"mcp_discovery_options[server_type]\"]').on('change', toggleSections);
+            $('#mcp_trust_class').on('change', toggleComplianceSection);
+            $('#mcp_auth_type').on('change', toggleAuthEndpoint);
+            toggleSections();
+            toggleComplianceSection();
+            toggleAuthEndpoint();
+
+            // AJAX validate
+            $('#mcp-validate-btn').on('click', function(e){
+                e.preventDefault();
+                var btn = $(this);
+                btn.prop('disabled', true).text('Checking...');
+                $('#mcp-validation-results').html('');
+                $.post(ajaxurl, {
+                    action: 'mcp_validate',
+                    nonce: $('#mcp_nonce').val()
+                }, function(resp){
+                    btn.prop('disabled', false).text('Check coherence');
+                    if (!resp.success) { return; }
+                    var html = '<ul class=\"mcp-checks\">';
+                    $.each(resp.data, function(i, c){
+                        var icon = c.level === 'error' ? '✗' : c.level === 'warning' ? '⚠' : c.level === 'success' ? '✓' : 'ℹ';
+                        html += '<li class=\"mcp-check-' + c.level + '\"><span class=\"mcp-icon\">' + icon + '</span> ' + c.message + '</li>';
+                    });
+                    html += '</ul>';
+                    $('#mcp-validation-results').html(html);
+                });
+            });
+        });
+        ";
+    }
+
+    public function ajax_validate() {
+        check_ajax_referer( 'mcp_validate_nonce', 'nonce' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( 'Unauthorized' );
+        }
+        $checks = MCP_Validator::check();
+        wp_send_json_success( $checks );
     }
 
     public function add_menu() {
@@ -43,6 +115,12 @@ class MCP_Admin {
     public function sanitize_options( $input ) {
         $output = array();
 
+        // Server type
+        $allowed_types = array( 'none', 'external', 'internal' );
+        $output['server_type'] = in_array( $input['server_type'] ?? 'none', $allowed_types, true )
+            ? $input['server_type']
+            : 'none';
+
         // Base
         $output['enabled']     = ! empty( $input['enabled'] );
         $output['name']        = sanitize_text_field( $input['name'] ?? '' );
@@ -52,81 +130,153 @@ class MCP_Admin {
         $output['contact']     = sanitize_email( $input['contact'] ?? '' );
         $output['docs']        = esc_url_raw( $input['docs'] ?? '' );
         $output['crawl']       = ! empty( $input['crawl'] );
-        $output['coverage']    = sanitize_text_field( $input['coverage'] ?? '' );
+        $output['coverage']    = strtoupper( sanitize_text_field( $input['coverage'] ?? '' ) );
+        $output['cache_ttl']   = max( 60, (int) ( $input['cache_ttl'] ?? 3600 ) );
 
-        // Auth — draft-04 core vocabulary + x- extensions
+        // Auth
         $allowed_auth = array( 'none', 'bearer', 'mtls', 'apikey', 'oauth2' );
         $auth_type = $input['auth_type'] ?? 'none';
         if ( ! in_array( $auth_type, $allowed_auth, true ) ) {
-            if ( strpos( $auth_type, 'x-' ) !== 0 ) {
-                $auth_type = 'none';
-            }
+            $auth_type = ( strpos( $auth_type, 'x-' ) === 0 ) ? $auth_type : 'none';
         }
         $output['auth_type']     = $auth_type;
         $output['auth_endpoint'] = esc_url_raw( $input['auth_endpoint'] ?? '' );
 
-        // trust_class — draft-04 Section 6.10.2
+        // trust_class
         $allowed_trust = array( '', 'public', 'sandbox', 'enterprise', 'regulated' );
         $output['trust_class'] = in_array( $input['trust_class'] ?? '', $allowed_trust, true )
-            ? $input['trust_class']
-            : '';
+            ? $input['trust_class'] : '';
 
-        // sandbox
-        $output['expires_days'] = min( 365, max( 1, (int) ( $input['expires_days'] ?? 30 ) ) );
-
-        // regulated
-        $output['jurisdiction']      = sanitize_text_field( $input['jurisdiction'] ?? '' );
-        $output['frameworks']        = sanitize_text_field( $input['frameworks'] ?? '' );
-        $output['log_retention_days'] = max( 1, (int) ( $input['log_retention_days'] ?? 90 ) );
-
-        // cache_ttl
-        $output['cache_ttl'] = max( 60, (int) ( $input['cache_ttl'] ?? 3600 ) );
+        $output['expires_days']        = min( 365, max( 1, (int) ( $input['expires_days'] ?? 30 ) ) );
+        $output['jurisdiction']        = sanitize_text_field( $input['jurisdiction'] ?? '' );
+        $output['frameworks']          = sanitize_text_field( $input['frameworks'] ?? '' );
+        $output['log_retention_days']  = max( 1, (int) ( $input['log_retention_days'] ?? 90 ) );
 
         return $output;
     }
 
     public function render_page() {
-        $options      = get_option( 'mcp_discovery_options', array() );
+        $options     = get_option( 'mcp_discovery_options', array() );
         $manifest_url = home_url( '/.well-known/mcp-server' );
         $mcp_uri      = 'mcp://' . wp_parse_url( home_url(), PHP_URL_HOST );
+        $server_type  = $options['server_type'] ?? 'none';
         $trust_class  = $options['trust_class'] ?? '';
+        $auth_type    = $options['auth_type'] ?? 'none';
+        $nonce        = wp_create_nonce( 'mcp_validate_nonce' );
+
+        // Run quick static checks (no HTTP) for the status bar
+        $static_checks = MCP_Validator::check( $options );
+        $has_errors    = ! empty( array_filter( $static_checks, fn( $c ) => $c['level'] === 'error' ) );
+        $has_warnings  = ! empty( array_filter( $static_checks, fn( $c ) => $c['level'] === 'warning' ) );
+        $status_class  = $has_errors ? 'error' : ( $has_warnings ? 'warning' : 'success' );
+        $status_label  = $has_errors ? 'Issues found' : ( $has_warnings ? 'Warnings' : 'Ready' );
         ?>
         <div class="wrap">
             <h1><?php esc_html_e( 'MCP Discovery', 'mcp-discovery' ); ?></h1>
-            <p><?php
+            <p style="color:#666;font-size:13px;"><?php
                 printf(
-                    wp_kses(
-                        __( 'This plugin exposes <code>/.well-known/mcp-server</code> so AI agents can discover your MCP server. Implements <a href="%s" target="_blank">draft-serra-mcp-discovery-uri-04</a>.', 'mcp-discovery' ),
-                        array( 'code' => array(), 'a' => array( 'href' => array(), 'target' => array() ) )
-                    ),
+                    wp_kses( __( 'Exposes <code>/.well-known/mcp-server</code> so AI agents can discover your site via <code>mcp://</code>. Implements <a href="%s" target="_blank">draft-serra-mcp-discovery-uri-04</a>.', 'mcp-discovery' ),
+                    array( 'code' => array(), 'a' => array( 'href' => array(), 'target' => array() ) ) ),
                     esc_url( 'https://datatracker.ietf.org/doc/draft-serra-mcp-discovery-uri/' )
                 );
             ?></p>
 
-            <div class="notice notice-info">
-                <p>
-                    <strong><?php esc_html_e( 'Your MCP URI:', 'mcp-discovery' ); ?></strong>
-                    <code><?php echo esc_html( $mcp_uri ); ?></code>
+            <?php /* Status bar */ ?>
+            <div class="mcp-status-bar mcp-status-<?php echo esc_attr( $status_class ); ?>" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:4px;margin-bottom:16px;background:<?php echo $has_errors ? '#fdecea' : ( $has_warnings ? '#fdf6e3' : '#e6f4ea' ); ?>;border:1px solid <?php echo $has_errors ? '#f5c2be' : ( $has_warnings ? '#f5e0a0' : '#b2dfb8' ); ?>;">
+                <div>
+                    <strong style="color:<?php echo $has_errors ? '#8b2a20' : ( $has_warnings ? '#7a5c00' : '#276b37' ); ?>;">
+                        <?php echo $has_errors ? '✗' : ( $has_warnings ? '⚠' : '✓' ); ?>
+                        <?php echo esc_html( $status_label ); ?>
+                    </strong>
                     &nbsp;|&nbsp;
-                    <a href="<?php echo esc_url( $manifest_url ); ?>" target="_blank">
-                        <?php esc_html_e( 'View manifest', 'mcp-discovery' ); ?>
-                    </a>
-                </p>
+                    <a href="<?php echo esc_url( $manifest_url ); ?>" target="_blank" style="font-size:13px;"><?php esc_html_e( 'View manifest', 'mcp-discovery' ); ?></a>
+                    &nbsp;|&nbsp;
+                    <code style="font-size:12px;"><?php echo esc_html( $mcp_uri ); ?></code>
+                </div>
+                <div>
+                    <input type="hidden" id="mcp_nonce" value="<?php echo esc_attr( $nonce ); ?>">
+                    <button id="mcp-validate-btn" class="button button-secondary"><?php esc_html_e( 'Check coherence', 'mcp-discovery' ); ?></button>
+                </div>
             </div>
+            <div id="mcp-validation-results" style="margin-bottom:16px;"></div>
+
+            <style>
+                .mcp-checks { margin:0; padding:0; list-style:none; }
+                .mcp-checks li { padding:8px 12px; margin-bottom:4px; border-radius:4px; font-size:13px; display:flex; align-items:flex-start; gap:8px; }
+                .mcp-check-error   { background:#fdecea; color:#8b2a20; }
+                .mcp-check-warning { background:#fdf6e3; color:#7a5c00; }
+                .mcp-check-success { background:#e6f4ea; color:#276b37; }
+                .mcp-check-info    { background:#e8f0f7; color:#2d6a9f; }
+                .mcp-icon { font-weight:700; flex-shrink:0; }
+                .mcp-section-header { margin: 24px 0 4px; border-bottom: 1px solid #ddd; padding-bottom:6px; font-size:14px; font-weight:600; color:#444; }
+                .mcp-note { font-size:12px; color:#888; font-style:italic; }
+            </style>
 
             <form method="post" action="options.php">
                 <?php settings_fields( 'mcp_discovery' ); ?>
 
-                <h2><?php esc_html_e( 'General', 'mcp-discovery' ); ?></h2>
+                <?php /* ============ STEP 1 — SERVER TYPE ============ */ ?>
+                <div class="mcp-section-header">
+                    <?php esc_html_e( '1. Server type', 'mcp-discovery' ); ?>
+                </div>
+                <table class="form-table">
+                    <tr>
+                        <th><?php esc_html_e( 'What does this site do?', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <label style="display:block;margin-bottom:8px;">
+                                <input type="radio" name="mcp_discovery_options[server_type]" value="none" <?php checked( $server_type, 'none' ); ?> />
+                                <strong><?php esc_html_e( 'Discovery only', 'mcp-discovery' ); ?></strong>
+                                <span class="description"> — <?php esc_html_e( 'I have an external MCP server or I am just advertising discovery. The manifest points to an existing endpoint.', 'mcp-discovery' ); ?></span>
+                            </label>
+                            <label style="display:block;margin-bottom:8px;">
+                                <input type="radio" name="mcp_discovery_options[server_type]" value="external" <?php checked( $server_type, 'external' ); ?> />
+                                <strong><?php esc_html_e( 'External MCP server', 'mcp-discovery' ); ?></strong>
+                                <span class="description"> — <?php esc_html_e( 'My MCP server runs separately. I will provide its URL below.', 'mcp-discovery' ); ?></span>
+                            </label>
+                            <label style="display:block;">
+                                <input type="radio" name="mcp_discovery_options[server_type]" value="internal" <?php checked( $server_type, 'internal' ); ?> />
+                                <strong><?php esc_html_e( 'WordPress MCP server', 'mcp-discovery' ); ?></strong>
+                                <span class="description"> — <?php esc_html_e( 'Activate the built-in MCP endpoint on this WordPress site (wp-json/mcp/v1).', 'mcp-discovery' ); ?></span>
+                            </label>
+                        </td>
+                    </tr>
+                </table>
+
+                <?php /* ============ STEP 2 — ENDPOINT CONFIGURATION ============ */ ?>
+                <div class="mcp-section-header">
+                    <?php esc_html_e( '2. Endpoint', 'mcp-discovery' ); ?>
+                </div>
                 <table class="form-table">
                     <tr>
                         <th><?php esc_html_e( 'Enable', 'mcp-discovery' ); ?></th>
                         <td>
-                            <input type="checkbox" name="mcp_discovery_options[enabled]" value="1"
-                                <?php checked( $options['enabled'] ?? true ); ?> />
-                            <?php esc_html_e( 'Expose /.well-known/mcp-server', 'mcp-discovery' ); ?>
+                            <input type="checkbox" name="mcp_discovery_options[enabled]" value="1" <?php checked( $options['enabled'] ?? true ); ?> />
+                            <?php esc_html_e( 'Publish /.well-known/mcp-server', 'mcp-discovery' ); ?>
                         </td>
                     </tr>
+                    <tr class="mcp-section-external mcp-section-none">
+                        <th><?php esc_html_e( 'MCP Endpoint URL', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="url" name="mcp_discovery_options[endpoint]" class="regular-text"
+                                value="<?php echo esc_attr( $options['endpoint'] ?? '' ); ?>"
+                                placeholder="https://yoursite.com/mcp" />
+                            <p class="description"><?php esc_html_e( 'The URL where your MCP server responds. Leave empty to use the default.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
+                    <tr class="mcp-section-internal">
+                        <th><?php esc_html_e( 'Built-in endpoint', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <code><?php echo esc_html( rest_url( 'mcp/v1' ) ); ?></code>
+                            <p class="description"><?php esc_html_e( 'The built-in MCP endpoint will be activated at this URL. Register your tools via the mcp_register_tools action.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
+                </table>
+
+                <?php /* ============ STEP 2b — GENERAL INFO ============ */ ?>
+                <div class="mcp-section-header">
+                    <?php esc_html_e( '2b. Server information', 'mcp-discovery' ); ?>
+                </div>
+                <table class="form-table">
                     <tr>
                         <th><?php esc_html_e( 'Server Name', 'mcp-discovery' ); ?></th>
                         <td>
@@ -138,17 +288,8 @@ class MCP_Admin {
                     <tr>
                         <th><?php esc_html_e( 'Description', 'mcp-discovery' ); ?></th>
                         <td>
-                            <textarea name="mcp_discovery_options[description]" class="large-text" rows="3"
+                            <textarea name="mcp_discovery_options[description]" class="large-text" rows="2"
                                 placeholder="<?php echo esc_attr( get_bloginfo( 'description' ) ); ?>"><?php echo esc_textarea( $options['description'] ?? '' ); ?></textarea>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th><?php esc_html_e( 'MCP Endpoint URL', 'mcp-discovery' ); ?></th>
-                        <td>
-                            <input type="url" name="mcp_discovery_options[endpoint]" class="regular-text"
-                                value="<?php echo esc_attr( $options['endpoint'] ?? '' ); ?>"
-                                placeholder="<?php echo esc_attr( rest_url( 'mcp/v1' ) ); ?>" />
-                            <p class="description"><?php esc_html_e( 'Leave empty to use the default REST API endpoint.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -156,8 +297,17 @@ class MCP_Admin {
                         <td>
                             <input type="text" name="mcp_discovery_options[categories]" class="regular-text"
                                 value="<?php echo esc_attr( $options['categories'] ?? '' ); ?>"
-                                placeholder="e-commerce, hardware, fashion" />
+                                placeholder="e-commerce, hardware" />
                             <p class="description"><?php esc_html_e( 'Comma-separated. WooCommerce adds "e-commerce" automatically.', 'mcp-discovery' ); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th><?php esc_html_e( 'Coverage', 'mcp-discovery' ); ?></th>
+                        <td>
+                            <input type="text" name="mcp_discovery_options[coverage]" style="width:80px"
+                                value="<?php echo esc_attr( $options['coverage'] ?? '' ); ?>"
+                                placeholder="IT" />
+                            <p class="description"><?php esc_html_e( 'ISO 3166-1 country code. Examples: IT, EU, WW.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -177,18 +327,8 @@ class MCP_Admin {
                     <tr>
                         <th><?php esc_html_e( 'Allow Crawling', 'mcp-discovery' ); ?></th>
                         <td>
-                            <input type="checkbox" name="mcp_discovery_options[crawl]" value="1"
-                                <?php checked( $options['crawl'] ?? true ); ?> />
+                            <input type="checkbox" name="mcp_discovery_options[crawl]" value="1" <?php checked( $options['crawl'] ?? true ); ?> />
                             <?php esc_html_e( 'Allow MCP crawlers to index this server.', 'mcp-discovery' ); ?>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th><?php esc_html_e( 'Coverage', 'mcp-discovery' ); ?></th>
-                        <td>
-                            <input type="text" name="mcp_discovery_options[coverage]" style="width:80px"
-                                value="<?php echo esc_attr( $options['coverage'] ?? '' ); ?>"
-                                placeholder="IT" />
-                            <p class="description"><?php esc_html_e( 'ISO 3166-1 country code for the geographic coverage of this server. Examples: IT, EU, WW.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -196,71 +336,80 @@ class MCP_Admin {
                         <td>
                             <input type="number" name="mcp_discovery_options[cache_ttl]" min="60" max="86400"
                                 value="<?php echo esc_attr( $options['cache_ttl'] ?? 3600 ); ?>" style="width:100px" />
-                            <p class="description"><?php esc_html_e( 'How long clients should cache this manifest. Default: 3600 (1 hour). For regulated servers use 300 or less.', 'mcp-discovery' ); ?></p>
+                            <p class="description"><?php esc_html_e( 'Default: 3600. Use 300 or less for regulated servers.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
                 </table>
 
-                <h2><?php esc_html_e( 'Authentication', 'mcp-discovery' ); ?></h2>
-                <table class="form-table">
+                <?php /* ============ STEP 2c — AUTHENTICATION ============ */ ?>
+                <div class="mcp-section-header mcp-section-auth">
+                    <?php esc_html_e( '2c. Authentication', 'mcp-discovery' ); ?>
+                </div>
+                <table class="form-table mcp-section-auth">
                     <tr>
                         <th><?php esc_html_e( 'Auth Method', 'mcp-discovery' ); ?></th>
                         <td>
-                            <select name="mcp_discovery_options[auth_type]">
-                                <option value="none"   <?php selected( $options['auth_type'] ?? 'none', 'none' ); ?>><?php esc_html_e( 'None (public)', 'mcp-discovery' ); ?></option>
-                                <option value="bearer" <?php selected( $options['auth_type'] ?? 'none', 'bearer' ); ?>><?php esc_html_e( 'Bearer Token', 'mcp-discovery' ); ?></option>
-                                <option value="apikey" <?php selected( $options['auth_type'] ?? 'none', 'apikey' ); ?>><?php esc_html_e( 'API Key', 'mcp-discovery' ); ?></option>
-                                <option value="oauth2" <?php selected( $options['auth_type'] ?? 'none', 'oauth2' ); ?>><?php esc_html_e( 'OAuth 2.0', 'mcp-discovery' ); ?></option>
-                                <option value="mtls"   <?php selected( $options['auth_type'] ?? 'none', 'mtls' ); ?>><?php esc_html_e( 'Mutual TLS', 'mcp-discovery' ); ?></option>
+                            <select name="mcp_discovery_options[auth_type]" id="mcp_auth_type">
+                                <option value="none"   <?php selected( $auth_type, 'none' ); ?>><?php esc_html_e( 'None (public)', 'mcp-discovery' ); ?></option>
+                                <option value="bearer" <?php selected( $auth_type, 'bearer' ); ?>><?php esc_html_e( 'Bearer Token', 'mcp-discovery' ); ?></option>
+                                <option value="apikey" <?php selected( $auth_type, 'apikey' ); ?>><?php esc_html_e( 'API Key', 'mcp-discovery' ); ?></option>
+                                <option value="oauth2" <?php selected( $auth_type, 'oauth2' ); ?>><?php esc_html_e( 'OAuth 2.0', 'mcp-discovery' ); ?></option>
+                                <option value="mtls"   <?php selected( $auth_type, 'mtls' ); ?>><?php esc_html_e( 'Mutual TLS', 'mcp-discovery' ); ?></option>
                             </select>
+                            <p class="mcp-auth-required-note description" style="color:#c0392b;"><?php esc_html_e( 'Required for enterprise and regulated trust class.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
-                    <tr>
+                    <tr id="mcp_auth_endpoint_row">
                         <th><?php esc_html_e( 'Auth Endpoint URL', 'mcp-discovery' ); ?></th>
                         <td>
                             <input type="url" name="mcp_discovery_options[auth_endpoint]" class="regular-text"
                                 value="<?php echo esc_attr( $options['auth_endpoint'] ?? '' ); ?>"
                                 placeholder="https://yoursite.com/.well-known/oauth-authorization-server" />
-                            <p class="description"><?php esc_html_e( 'Required for Bearer and OAuth 2.0 methods.', 'mcp-discovery' ); ?></p>
+                            <p class="description"><?php esc_html_e( 'Required for Bearer and OAuth 2.0.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
                 </table>
 
-                <h2><?php esc_html_e( 'Security Posture', 'mcp-discovery' ); ?></h2>
-                <p class="description"><?php esc_html_e( 'Declares the server trust class per draft-04 Section 6.10. If left empty, clients treat this server as "public".', 'mcp-discovery' ); ?></p>
-                <table class="form-table">
+                <?php /* ============ STEP 3 — SECURITY POSTURE ============ */ ?>
+                <div class="mcp-section-header mcp-section-security">
+                    <?php esc_html_e( '3. Security posture', 'mcp-discovery' ); ?>
+                </div>
+                <p class="description" style="margin-bottom:12px;"><?php esc_html_e( 'Declares the server trust class per draft-04 Section 6.10. If not declared, clients treat this server as "public".', 'mcp-discovery' ); ?></p>
+                <table class="form-table mcp-section-security">
                     <tr>
                         <th><?php esc_html_e( 'Trust Class', 'mcp-discovery' ); ?></th>
                         <td>
-                            <select name="mcp_discovery_options[trust_class]">
+                            <select name="mcp_discovery_options[trust_class]" id="mcp_trust_class">
                                 <option value=""           <?php selected( $trust_class, '' ); ?>><?php esc_html_e( '— not declared (defaults to public) —', 'mcp-discovery' ); ?></option>
                                 <option value="public"     <?php selected( $trust_class, 'public' ); ?>><?php esc_html_e( 'public — no restrictions', 'mcp-discovery' ); ?></option>
                                 <option value="sandbox"    <?php selected( $trust_class, 'sandbox' ); ?>><?php esc_html_e( 'sandbox — non-production / test', 'mcp-discovery' ); ?></option>
-                                <option value="enterprise" <?php selected( $trust_class, 'enterprise' ); ?>><?php esc_html_e( 'enterprise — controlled access', 'mcp-discovery' ); ?></option>
+                                <option value="enterprise" <?php selected( $trust_class, 'enterprise' ); ?>><?php esc_html_e( 'enterprise — controlled access, auth required', 'mcp-discovery' ); ?></option>
                                 <option value="regulated"  <?php selected( $trust_class, 'regulated' ); ?>><?php esc_html_e( 'regulated — compliance required', 'mcp-discovery' ); ?></option>
                             </select>
                         </td>
                     </tr>
-                    <tr>
+                    <tr id="mcp_expires_row">
                         <th><?php esc_html_e( 'Manifest Expiry (days)', 'mcp-discovery' ); ?></th>
                         <td>
                             <input type="number" name="mcp_discovery_options[expires_days]" min="1" max="365"
                                 value="<?php echo esc_attr( $options['expires_days'] ?? 30 ); ?>" style="width:80px" />
-                            <p class="description"><?php esc_html_e( 'Required when trust class is "sandbox". Default: 30 days.', 'mcp-discovery' ); ?></p>
+                            <p class="description"><?php esc_html_e( 'Required for sandbox. Default: 30 days.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
                 </table>
 
-                <h2><?php esc_html_e( 'Compliance (regulated only)', 'mcp-discovery' ); ?></h2>
-                <p class="description"><?php esc_html_e( 'Required when trust class is "regulated".', 'mcp-discovery' ); ?></p>
-                <table class="form-table">
+                <?php /* ============ STEP 3b — COMPLIANCE (regulated only) ============ */ ?>
+                <div class="mcp-section-header mcp-compliance-section">
+                    <?php esc_html_e( '3b. Compliance (regulated only)', 'mcp-discovery' ); ?>
+                </div>
+                <table class="form-table mcp-compliance-section">
                     <tr>
                         <th><?php esc_html_e( 'Jurisdiction', 'mcp-discovery' ); ?></th>
                         <td>
                             <input type="text" name="mcp_discovery_options[jurisdiction]" class="regular-text"
                                 value="<?php echo esc_attr( $options['jurisdiction'] ?? '' ); ?>"
                                 placeholder="EU" />
-                            <p class="description"><?php esc_html_e( 'ISO 3166-1 country code or regional code: EU, EEA, UK, IT, DE, US, etc.', 'mcp-discovery' ); ?></p>
+                            <p class="description"><?php esc_html_e( 'ISO 3166-1 or regional code: EU, EEA, UK, IT, DE, US, etc. Required for regulated.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -277,12 +426,12 @@ class MCP_Admin {
                         <td>
                             <input type="number" name="mcp_discovery_options[log_retention_days]" min="1"
                                 value="<?php echo esc_attr( $options['log_retention_days'] ?? 90 ); ?>" style="width:80px" />
-                            <p class="description"><?php esc_html_e( 'Minimum log retention period declared to clients. Default: 90 days.', 'mcp-discovery' ); ?></p>
+                            <p class="description"><?php esc_html_e( 'Minimum log retention declared to clients. Default: 90 days.', 'mcp-discovery' ); ?></p>
                         </td>
                     </tr>
                 </table>
 
-                <?php submit_button(); ?>
+                <?php submit_button( __( 'Save and publish manifest', 'mcp-discovery' ) ); ?>
             </form>
         </div>
         <?php
