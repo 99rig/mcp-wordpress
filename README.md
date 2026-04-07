@@ -1,6 +1,6 @@
-# mcp-wordpress
+# mcp-wordpress — Mumble MCP Discovery
 
-**MCP Discovery — WordPress Plugin v0.4.1**
+**Mumble MCP Discovery — WordPress Plugin v0.4.1**
 
 Exposes `/.well-known/mcp-server` on any WordPress site so AI agents
 can discover it via `mcp://`. Implements
@@ -47,7 +47,7 @@ AI agents resolve `mcp://yoursite.com` and connect directly.
 4. Verify at `https://yoursite.com/.well-known/mcp-server`
 
 Or wait for approval on wordpress.org and install directly from
-**Plugins → Add New → Search "MCP Discovery"**.
+**Plugins → Add New → Search "Mumble MCP Discovery"**.
 
 ## Settings
 
