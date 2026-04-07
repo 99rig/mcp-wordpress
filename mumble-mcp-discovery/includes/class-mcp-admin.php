@@ -186,8 +186,9 @@ class MMCD_Admin {
         $status_txt  = $has_errors ? 'Issues found' : ( $has_warn ? 'Warnings' : 'Ready' );
         ?>
         <div class="wrap">
-            <h1><?php esc_html_e( 'MCP Discovery', 'mumble-mcp-discovery' ); ?></h1>
+            <h1><?php esc_html_e( 'Mumble MCP Discovery', 'mumble-mcp-discovery' ); ?></h1>
             <p style="color:#666;font-size:13px;"><?php
+                // translators: %s is the URL of the IETF draft specification.
                 printf(
                     wp_kses( __( 'Exposes <code>/.well-known/mcp-server</code> so AI agents can discover your site via <code>mcp://</code>. Implements <a href="%s" target="_blank">draft-serra-mcp-discovery-uri-04</a>.', 'mumble-mcp-discovery' ),
                         array( 'code' => array(), 'a' => array( 'href' => array(), 'target' => array() ) ) ),
