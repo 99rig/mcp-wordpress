@@ -3,12 +3,12 @@
  * Manifest coherence validator.
  * Checks endpoint availability, trust_class sub-fields, domain match.
  *
- * @package MCPDiscovery
+ * @package MumbleMCPDiscovery
  */
 
 defined( 'ABSPATH' ) || exit;
 
-class MCP_Validator {
+class MMCD_Validator {
 
     /**
      * Run all checks against current options.
@@ -16,13 +16,13 @@ class MCP_Validator {
      */
     public static function check( $options = null ) {
         if ( null === $options ) {
-            $options = get_option( 'mcp_discovery_options', array() );
+            $options = get_option( 'mmcd_options', array() );
         }
 
         $errors = array();
 
         // Build a draft manifest for validation
-        $manifest = MCP_Manifest::build();
+        $manifest = MMCD_Manifest::build();
 
         // 1. Endpoint presence
         $endpoint = $manifest['endpoint'] ?? '';

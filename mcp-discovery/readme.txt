@@ -1,5 +1,5 @@
-=== MCP Discovery ===
-Contributors: 99rig
+=== Mumble MCP Discovery ===
+Contributors: mumble2026, 99rig
 Tags: mcp, ai, discovery, rest-api, woocommerce
 Requires at least: 5.0
 Tested up to: 6.9

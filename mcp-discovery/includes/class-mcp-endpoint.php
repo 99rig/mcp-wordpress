@@ -5,12 +5,12 @@
  * Works on both Apache and Nginx deployments by intercepting
  * the request at the earliest possible WordPress hook.
  *
- * @package MCPDiscovery
+ * @package MumbleMCPDiscovery
  */
 
 defined( 'ABSPATH' ) || exit;
 
-class MCP_Endpoint {
+class MMCD_Endpoint {
 
     private static $instance = null;
 
@@ -43,7 +43,7 @@ class MCP_Endpoint {
             return;
         }
 
-        $options = get_option( 'mcp_discovery_options', array() );
+        $options = get_option( 'mmcd_options', array() );
 
         // Return 404 if plugin is explicitly disabled
         if ( array_key_exists( 'enabled', $options ) && ! $options['enabled'] ) {
@@ -51,7 +51,7 @@ class MCP_Endpoint {
             exit;
         }
 
-        $manifest = MCP_Manifest::build();
+        $manifest = MMCD_Manifest::build();
 
         // Headers per draft-serra-mcp-discovery-uri
         if ( ! headers_sent() ) {

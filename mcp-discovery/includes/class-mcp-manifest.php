@@ -4,18 +4,18 @@
  * Compatible with WordPress 5.0+ and PHP 7.4+.
  * Implements draft-serra-mcp-discovery-uri-04.
  *
- * @package MCPDiscovery
+ * @package MumbleMCPDiscovery
  */
 
 defined( 'ABSPATH' ) || exit;
 
-class MCP_Manifest {
+class MMCD_Manifest {
 
     const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
 
     public static function build() {
-        $options     = get_option( 'mcp_discovery_options', array() );
-        $mcp_version = get_option( 'mcp_protocol_version', self::DEFAULT_PROTOCOL_VERSION );
+        $options     = get_option( 'mmcd_options', array() );
+        $mcp_version = get_option( 'mmcd_protocol_version', self::DEFAULT_PROTOCOL_VERSION );
         $server_type = $options['server_type'] ?? 'none';
 
         $manifest = array(
